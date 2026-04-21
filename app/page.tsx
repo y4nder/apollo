@@ -9,6 +9,8 @@ import { SkillChipRow } from "./components/candidate/SkillChip";
 import { JobMatchList } from "./components/candidate/JobMatchList";
 import { ApplyDialog } from "./components/candidate/ApplyDialog";
 import { DownloadRoadmapButton } from "./components/candidate/DownloadRoadmapButton";
+import { DemandBars } from "./components/candidate/DemandBars";
+import { CoverageDonut } from "./components/candidate/CoverageDonut";
 import type { JobWithEmployer } from "./components/candidate/JobMatchCard";
 import { rankAllJobs } from "./lib/skills/ranker";
 import type {
@@ -202,6 +204,7 @@ export default function Home() {
           <SkillsPanel
             filename={file?.name ?? "resume.pdf"}
             skills={extracted?.skills ?? []}
+            jobs={jobs}
             onReset={reset}
           />
           <section>
@@ -333,14 +336,23 @@ function Dot() {
 function SkillsPanel({
   filename,
   skills,
+  jobs,
   onReset,
 }: {
   filename: string;
   skills: ExtractedSkill[];
+  jobs: JobFromApi[];
   onReset: () => void;
 }) {
+  const userSkillNames = skills.map((s) => s.name);
   return (
     <aside className="apollo-card-strong p-5 space-y-4 self-start lg:sticky lg:top-6">
+      {jobs.length > 0 && skills.length > 0 && (
+        <>
+          <CoverageDonut userSkills={userSkillNames} jobs={jobs} />
+          <div className="apollo-divider" />
+        </>
+      )}
       <div>
         <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.22em] text-apollo-muted">
           <FileText className="w-3 h-3" />
@@ -362,6 +374,12 @@ function SkillsPanel({
           </p>
         )}
       </div>
+      {jobs.length > 0 && (
+        <>
+          <div className="apollo-divider" />
+          <DemandBars jobs={jobs} userSkills={userSkillNames} />
+        </>
+      )}
       <div className="apollo-divider" />
       <button
         type="button"
