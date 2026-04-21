@@ -4,9 +4,10 @@ import { useAnalysis, LANE_IDS } from "./context/AnalysisContext";
 import UploadDropzone from "./components/UploadDropzone";
 import ClaimsPreview from "./components/ClaimsPreview";
 import LaneColumn from "./components/LaneColumn";
-import ProgressBar from "./components/ProgressBar";
-import CancelButton from "./components/CancelButton";
+import MissionStrip from "./components/MissionStrip";
 import VerificationReport from "./components/VerificationReport";
+import OrbitalBackdrop from "./components/idle/OrbitalBackdrop";
+import LaneTeaserRow from "./components/idle/LaneTeaser";
 
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -18,31 +19,40 @@ export default function Home() {
     return (
       <div className="flex-1 apollo-grid">
         <Header subtle />
-        <VerificationReport report={report} onReset={reset} />
+        <VerificationReport report={report} lanes={lanes} onReset={reset} />
       </div>
     );
   }
 
   if (phase === "idle") {
     return (
-      <div className="flex-1 flex flex-col apollo-grid">
-        <Header />
-        <main className="flex-1 flex flex-col items-center justify-center px-6 py-16">
-          <div className="text-center max-w-xl mb-10">
-            <div className="text-[10px] uppercase tracking-[0.24em] text-apollo-muted font-mono">
-              Resume verification · MVP
+      <div className="flex-1 flex flex-col apollo-grid relative">
+        <OrbitalBackdrop />
+        <div className="relative flex-1 flex flex-col">
+          <Header />
+          <main className="flex-1 flex flex-col items-center justify-center px-6 py-14">
+            <div className="text-center max-w-2xl mb-10">
+              <div className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-apollo-muted font-mono">
+                <span className="w-1 h-1 rounded-full bg-apollo-verify" />
+                Resume verification · MVP
+              </div>
+              <h1 className="apollo-serif text-[56px] mt-4 leading-[1.02] text-apollo-ink tracking-[-0.015em]">
+                Four agents. One candidate.{" "}
+                <span className="relative inline-block text-apollo-navy">
+                  Live receipts.
+                  <span className="absolute left-0 right-0 -bottom-0.5 h-[6px] bg-apollo-verify/25 -z-0" />
+                </span>
+              </h1>
+              <p className="mt-5 text-[15px] text-apollo-ink/70 leading-relaxed max-w-lg mx-auto">
+                Apollo checks employers, LinkedIn, GitHub, and the open web in parallel.
+                You watch the browsers work — every click, every quote, every URL.
+              </p>
             </div>
-            <h1 className="apollo-serif text-5xl mt-4 leading-[1.05] text-apollo-ink">
-              Four agents. One candidate. <span className="text-apollo-navy">Live receipts.</span>
-            </h1>
-            <p className="mt-5 text-base text-apollo-ink/70 leading-relaxed max-w-md mx-auto">
-              Apollo checks employers, LinkedIn, GitHub, and the open web in parallel. You watch the browsers work — every
-              click, every quote, every URL.
-            </p>
-          </div>
-          <UploadDropzone onFile={startAnalysis} maxBytes={DEFAULT_MAX_BYTES} />
-        </main>
-        <Footer />
+            <UploadDropzone onFile={startAnalysis} maxBytes={DEFAULT_MAX_BYTES} />
+            <LaneTeaserRow />
+          </main>
+          <Footer />
+        </div>
       </div>
     );
   }
@@ -71,32 +81,23 @@ export default function Home() {
   }
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col apollo-grid">
       <Header subtle />
-      <div className="border-b border-apollo-border bg-white/60 backdrop-blur">
-        <div className="max-w-[1400px] mx-auto px-6 py-4 space-y-3">
-          <div className="flex items-center justify-between gap-6 flex-wrap">
-            <div className="flex items-center gap-4 min-w-0">
-              <div className="text-[10px] uppercase tracking-[0.22em] text-apollo-muted font-mono">
-                Subject
-              </div>
-              <div className="apollo-serif text-xl text-apollo-ink truncate">
-                {claims?.candidateName ?? filename ?? "Candidate"}
-              </div>
-              {sequential && (
-                <span className="text-[10px] font-mono uppercase tracking-[0.18em] px-2 py-0.5 rounded bg-apollo-flag/10 text-apollo-flag">
-                  Sequential mode
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              <CancelButton onCancel={cancel} />
-            </div>
+      <MissionStrip
+        phase={phase}
+        subject={claims?.candidateName ?? filename ?? "Candidate"}
+        lanes={lanes}
+        elapsedMs={elapsedMs}
+        sequential={sequential}
+        onCancel={cancel}
+      />
+      {claims && (
+        <div className="border-b border-apollo-border bg-white/40">
+          <div className="max-w-[1400px] mx-auto px-6 py-2.5">
+            <ClaimsPreview claims={claims} />
           </div>
-          <ProgressBar phase={phase} lanes={lanes} elapsedMs={elapsedMs} />
-          {claims && <ClaimsPreview claims={claims} />}
         </div>
-      </div>
+      )}
       <main className="flex-1 max-w-[1400px] w-full mx-auto px-6 py-6">
         <div className="grid gap-5 grid-cols-1 lg:grid-cols-2">
           {LANE_IDS.map((id) => (

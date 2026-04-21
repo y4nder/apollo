@@ -1,16 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import type { ResumeClaims } from "../lib/schemas";
 
 export default function ClaimsPreview({ claims }: { claims: ResumeClaims }) {
-  const [visible, setVisible] = useState(true);
-  useEffect(() => {
-    const t = window.setTimeout(() => setVisible(false), 6000);
-    return () => window.clearTimeout(t);
-  }, [claims]);
-
-  if (!visible) return null;
+  const reduce = useReducedMotion();
 
   const chips: string[] = [];
   for (const e of claims.employers.slice(0, 4)) {
@@ -20,16 +14,33 @@ export default function ClaimsPreview({ claims }: { claims: ResumeClaims }) {
   if (claims.githubHandle) chips.push(`gh/${claims.githubHandle}`);
   for (const s of claims.schools.slice(0, 1)) chips.push(s.name);
 
+  if (chips.length === 0) return null;
+
   return (
-    <div className="apollo-fade-up flex flex-wrap items-center gap-2">
+    <motion.div
+      initial={reduce ? false : { opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      className="flex flex-wrap items-center gap-2"
+    >
       <span className="text-[10px] uppercase tracking-[0.22em] text-apollo-muted font-mono mr-1">
-        Claims extracted
+        Claims extracted · {chips.length}
       </span>
       {chips.map((c, i) => (
-        <span key={i} className="apollo-chip">
+        <motion.span
+          key={c + i}
+          initial={reduce ? false : { opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{
+            duration: 0.3,
+            delay: 0.06 * i,
+            ease: [0.22, 1, 0.36, 1],
+          }}
+          className="apollo-chip"
+        >
           {c}
-        </span>
+        </motion.span>
       ))}
-    </div>
+    </motion.div>
   );
 }
