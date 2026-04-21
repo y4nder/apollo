@@ -8,6 +8,7 @@ import OrbitalBackdrop from "./components/idle/OrbitalBackdrop";
 import { SkillChipRow } from "./components/candidate/SkillChip";
 import { JobMatchList } from "./components/candidate/JobMatchList";
 import { ApplyDialog } from "./components/candidate/ApplyDialog";
+import { DownloadRoadmapButton } from "./components/candidate/DownloadRoadmapButton";
 import { DemandBars } from "./components/candidate/DemandBars";
 import { CoverageDonut } from "./components/candidate/CoverageDonut";
 import type { JobWithEmployer } from "./components/candidate/JobMatchCard";
@@ -207,7 +208,7 @@ export default function Home() {
             onReset={reset}
           />
           <section>
-            <div className="flex items-baseline justify-between mb-4">
+            <div className="flex items-end justify-between gap-4 mb-4">
               <div>
                 <div className="text-[10px] font-mono uppercase tracking-[0.22em] text-apollo-muted">
                   {matches.length} roles · ranked by fit
@@ -216,6 +217,12 @@ export default function Home() {
                   Matching openings
                 </h2>
               </div>
+              <DownloadRoadmapButton
+                extractedSkills={extracted?.skills ?? []}
+                matches={matches}
+                jobs={jobs}
+                resumeFilename={file?.name}
+              />
             </div>
             <JobMatchList
               matches={matches}
