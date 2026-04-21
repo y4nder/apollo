@@ -37,7 +37,11 @@ export function JobMatchCard({
       layout
       initial={reduce ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      transition={{
+        duration: 0.35,
+        delay: Math.min((rank - 1) * 0.08, 0.6),
+        ease: [0.22, 1, 0.36, 1],
+      }}
       className="apollo-card-strong overflow-hidden"
     >
       <div className="px-5 pt-4 pb-3">
@@ -72,8 +76,32 @@ export function JobMatchCard({
           </div>
         </div>
         <div className="mt-4">
-          <ScoreBar score={score} compact />
+          <ScoreBar
+            score={score}
+            compact
+            breakdown={{
+              matched: matched.length,
+              adjacent: adjacent.length,
+              gaps: missing_core.length + missing_nice.length,
+            }}
+            suppressTooltip={open}
+          />
         </div>
+        {adjacent.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-mono uppercase tracking-[0.22em] text-apollo-muted">
+              Adjacent
+            </span>
+            {adjacent.map((a) => (
+              <SkillChip
+                key={a.required}
+                name={`${a.user_has} ~ ${a.required}`}
+                variant="adjacent"
+                title={`Your ${a.user_has} transfers to this role's ${a.required} requirement — mention both in your resume.`}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="border-t border-apollo-border bg-apollo-paper/40">
@@ -103,7 +131,7 @@ export function JobMatchCard({
                 {matched.length > 0 && (
                   <Section label="You have" tone="verify">
                     {matched.map((s) => (
-                      <SkillChip key={s} name={s} variant="matched" />
+                      <SkillChip key={s} name={s} variant="matched" pulse />
                     ))}
                   </Section>
                 )}
@@ -121,14 +149,24 @@ export function JobMatchCard({
                 {missing_core.length > 0 && (
                   <Section label="Missing · core" tone="contradict">
                     {missing_core.map((s) => (
-                      <SkillChip key={s} name={s} variant="missing-core" />
+                      <SkillChip
+                        key={s}
+                        name={s}
+                        variant="missing-core"
+                        expandable
+                      />
                     ))}
                   </Section>
                 )}
                 {missing_nice.length > 0 && (
                   <Section label="Missing · nice" tone="flag">
                     {missing_nice.map((s) => (
-                      <SkillChip key={s} name={s} variant="missing-nice" />
+                      <SkillChip
+                        key={s}
+                        name={s}
+                        variant="missing-nice"
+                        expandable
+                      />
                     ))}
                   </Section>
                 )}

@@ -87,6 +87,18 @@ body {
   animation: apolloFadeUp 0.25s ease-out both;
 }
 
+@keyframes apolloMatchPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
+  30%  { box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.35); }
+  100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
+}
+.apollo-match-pulse {
+  animation: apolloMatchPulse 0.6s ease-out 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .apollo-match-pulse { animation: none; }
+}
+
 .apollo-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: var(--apollo-border-strong) transparent;
