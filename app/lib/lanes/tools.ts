@@ -8,9 +8,14 @@ export interface ToolTrace {
 }
 
 const NAV_TIMEOUT_MS = 10_000;
+const DEAD_LINK_TIMEOUT_MS = 5_000;
 const SNAPSHOT_RETURN_CHARS = 500;
 const VALUE_RETURN_CHARS = 400;
 const QUOTE_RETURN_CHARS = 200;
+
+const DEAD_LINK_HOSTS = new Set<string>([
+  "csp.org.ph",
+]);
 
 const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
 
@@ -18,7 +23,24 @@ function isChromeErrorPage(url: string): boolean {
   return url.startsWith("chrome-error://") || url.startsWith("chrome://network-error");
 }
 
+function navTimeoutFor(url: string): number {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    if (DEAD_LINK_HOSTS.has(host)) return DEAD_LINK_TIMEOUT_MS;
+  } catch {
+    // fall through
+  }
+  return NAV_TIMEOUT_MS;
+}
+
 export function makeLaneTools(stagehand: Stagehand, trace: ToolTrace) {
+  let queue: Promise<unknown> = Promise.resolve();
+  const serialize = <T>(fn: () => Promise<T>): Promise<T> => {
+    const next = queue.then(fn, fn);
+    queue = next.catch(() => {});
+    return next;
+  };
+
   return {
     search: tool({
       description:
@@ -26,7 +48,7 @@ export function makeLaneTools(stagehand: Stagehand, trace: ToolTrace) {
       inputSchema: z.object({
         query: z.string().describe("The search query."),
       }),
-      execute: async ({ query }) => {
+      execute: ({ query }) => serialize(async () => {
         await trace.onAction(`search("${query}")`);
         const page = stagehand.context.activePage();
         if (!page) {
@@ -91,7 +113,7 @@ export function makeLaneTools(stagehand: Stagehand, trace: ToolTrace) {
 
         await trace.onObservation(`search failed on all engines: ${lastError ?? "unknown"}`);
         return { results: [], error: lastError ?? "all search engines failed" };
-      },
+      }),
     }),
 
     navigate: tool({
@@ -101,13 +123,14 @@ export function makeLaneTools(stagehand: Stagehand, trace: ToolTrace) {
         url: z.string().describe("Absolute URL to visit."),
         purpose: z.string().describe("One short sentence: why are you going here?"),
       }),
-      execute: async ({ url, purpose }) => {
+      execute: ({ url, purpose }) => serialize(async () => {
         await trace.onAction(`navigate(${url}) — ${purpose}`);
         try {
           const page = stagehand.context.activePage();
           if (!page) throw new Error("no active page");
+          const timeoutMs = navTimeoutFor(url);
           try {
-            await page.goto(url, { waitUntil: "domcontentloaded", timeoutMs: NAV_TIMEOUT_MS });
+            await page.goto(url, { waitUntil: "domcontentloaded", timeoutMs });
           } catch (navErr) {
             const msg = navErr instanceof Error ? navErr.message : String(navErr);
             if (/timeout|ERR_/i.test(msg)) {
@@ -143,7 +166,7 @@ export function makeLaneTools(stagehand: Stagehand, trace: ToolTrace) {
           await trace.onObservation(`navigation failed: ${msg}`);
           return { url, blocked: true, snapshot: "", error: msg };
         }
-      },
+      }),
     }),
 
     extract: tool({
@@ -152,7 +175,7 @@ export function makeLaneTools(stagehand: Stagehand, trace: ToolTrace) {
       inputSchema: z.object({
         instruction: z.string().describe("What to pull from the current page."),
       }),
-      execute: async ({ instruction }) => {
+      execute: ({ instruction }) => serialize(async () => {
         await trace.onAction(`extract("${instruction}")`);
         try {
           const page = stagehand.context.activePage();
@@ -183,7 +206,7 @@ export function makeLaneTools(stagehand: Stagehand, trace: ToolTrace) {
           await trace.onObservation(`extract failed: ${msg}`);
           return { value: "", error: msg };
         }
-      },
+      }),
     }),
   } as const;
 }

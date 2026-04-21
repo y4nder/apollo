@@ -1,4 +1,4 @@
-import type { LaneId, TraceStep, ClaimSummary } from "./schemas";
+import type { LaneId, TraceStep, ClaimSummary, VerificationReport } from "./schemas";
 import type { LaneState } from "../context/AnalysisContext";
 
 function normalizeUrl(u: string): string {
@@ -8,6 +8,39 @@ function normalizeUrl(u: string): string {
   } catch {
     return u;
   }
+}
+
+interface ParsedUrl {
+  host: string;
+  path: string;
+  isHttps: boolean;
+  canonical: string;
+}
+
+function parseUrl(u: string): ParsedUrl | null {
+  try {
+    const url = new URL(u);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    const path = url.pathname.replace(/\/$/, "");
+    if (isSearchIntermediate(host, path)) return null;
+    return {
+      host,
+      path,
+      isHttps: url.protocol === "https:",
+      canonical: host + path,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isSearchIntermediate(host: string, path: string): boolean {
+  if (host === "html.duckduckgo.com") return true;
+  if (host === "duckduckgo.com" && (path === "" || path === "/html")) return true;
+  if (host === "bing.com" && (path === "/search" || path === "")) return true;
+  if (host === "google.com" && path === "/search") return true;
+  return false;
 }
 
 function captureContext(
@@ -93,4 +126,94 @@ export function uniqueSources(claims: ClaimSummary[]): string[] {
   const set = new Set<string>();
   for (const c of claims) for (const s of c.sources) set.add(s);
   return Array.from(set);
+}
+
+export interface LinkAggregation {
+  url: string;
+  displayUrl: string;
+  host: string;
+  path: string;
+  lanes: LaneId[];
+  refCount: number;
+  quotes: Array<{ laneId: LaneId; quote: string }>;
+  loadBearing: boolean;
+}
+
+export function aggregateLinks(
+  lanes: Record<LaneId, LaneState>,
+  report: VerificationReport | null
+): LinkAggregation[] {
+  const map = new Map<string, LinkAggregation & { laneSet: Set<LaneId>; quoteKeys: Set<string> }>();
+
+  const upsert = (raw: string, laneId: LaneId | null, opts: { loadBearing?: boolean; quote?: { laneId: LaneId; quote: string } } = {}) => {
+    const parsed = parseUrl(raw);
+    if (!parsed) return;
+    let entry = map.get(parsed.canonical);
+    if (!entry) {
+      entry = {
+        url: parsed.canonical,
+        displayUrl: raw,
+        host: parsed.host,
+        path: parsed.path,
+        lanes: [],
+        refCount: 0,
+        quotes: [],
+        loadBearing: false,
+        laneSet: new Set<LaneId>(),
+        quoteKeys: new Set<string>(),
+      };
+      map.set(parsed.canonical, entry);
+    } else if (parsed.isHttps && !entry.displayUrl.startsWith("https://")) {
+      entry.displayUrl = raw;
+    }
+    entry.refCount += 1;
+    if (laneId) entry.laneSet.add(laneId);
+    if (opts.loadBearing) entry.loadBearing = true;
+    if (opts.quote) {
+      const key = opts.quote.laneId + "|" + opts.quote.quote;
+      if (!entry.quoteKeys.has(key)) {
+        entry.quoteKeys.add(key);
+        entry.quotes.push(opts.quote);
+      }
+    }
+  };
+
+  for (const lane of Object.values(lanes)) {
+    for (const step of lane.trace) {
+      if (step.link) upsert(step.link, lane.laneId);
+    }
+    for (const finding of lane.findings) {
+      for (const e of finding.evidence) {
+        upsert(e.url, lane.laneId, {
+          loadBearing: true,
+          quote: e.quote ? { laneId: lane.laneId, quote: e.quote } : undefined,
+        });
+      }
+    }
+  }
+
+  if (report) {
+    for (const claim of report.claims) {
+      for (const src of claim.sources) upsert(src, null, { loadBearing: true });
+    }
+  }
+
+  const out: LinkAggregation[] = Array.from(map.values()).map((entry) => ({
+    url: entry.url,
+    displayUrl: entry.displayUrl,
+    host: entry.host,
+    path: entry.path,
+    lanes: Array.from(entry.laneSet).sort(),
+    refCount: entry.refCount,
+    quotes: entry.quotes,
+    loadBearing: entry.loadBearing,
+  }));
+
+  out.sort((a, b) => {
+    if (a.loadBearing !== b.loadBearing) return a.loadBearing ? -1 : 1;
+    if (b.refCount !== a.refCount) return b.refCount - a.refCount;
+    return a.host.localeCompare(b.host);
+  });
+
+  return out;
 }

@@ -6,11 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "seed": "bun run --env-file=.env supabase/seed.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
     "@browserbasehq/stagehand": "^3.2.1",
+    "@supabase/ssr": "^0.10.2",
+    "@supabase/supabase-js": "^2.104.0",
     "ai": "^6.0.168",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.8.0",
@@ -18,6 +21,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
+    "unpdf": "^1.6.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

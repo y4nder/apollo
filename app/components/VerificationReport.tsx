@@ -13,9 +13,14 @@ import {
   TriangleAlert,
   ChevronDown,
   Sparkles,
+  Download,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { VerificationReport as ReportT, ClaimSummary } from "../lib/schemas";
+import type {
+  VerificationReport as ReportT,
+  ClaimSummary,
+  ResumeClaims,
+} from "../lib/schemas";
 import type { LaneState } from "../context/AnalysisContext";
 import { LANE_IDS } from "../context/AnalysisContext";
 import { Gauge } from "./primitives/Gauge";
@@ -23,12 +28,13 @@ import { StackedBar, type BarSegment } from "./primitives/StackedBar";
 import { SourceChip } from "./primitives/SourceChip";
 import { LaneIcon, LANE_SHORT } from "./primitives/Icon";
 import TimelineStep from "./TimelineStep";
+import LinksSurfaced from "./LinksSurfaced";
 import {
   buildEvidenceTrail,
   laneBreakdown,
   claimsBreakdown,
   trustScore,
-  uniqueSources,
+  aggregateLinks,
 } from "../lib/evidenceTrail";
 
 const OVERALL: Record<
@@ -103,10 +109,30 @@ const BREAKDOWN_SEGMENTS: Array<{
 interface Props {
   report: ReportT;
   lanes: Record<LaneState["laneId"], LaneState>;
+  claims: ResumeClaims | null;
+  runId: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  elapsedMs: number;
+  concurrency: number | null;
+  sequential: boolean;
+  filename: string | null;
   onReset: () => void;
 }
 
-export default function VerificationReport({ report, lanes, onReset }: Props) {
+export default function VerificationReport({
+  report,
+  lanes,
+  claims,
+  runId,
+  startedAt,
+  finishedAt,
+  elapsedMs,
+  concurrency,
+  sequential,
+  filename,
+  onReset,
+}: Props) {
   const reduce = useReducedMotion();
   const breakdown = useMemo(() => claimsBreakdown(report.claims), [report.claims]);
   const score = useMemo(() => trustScore(report.claims), [report.claims]);
@@ -122,7 +148,7 @@ export default function VerificationReport({ report, lanes, onReset }: Props) {
 
   const overall = OVERALL[report.overall];
   const OverallIcon = overall.Icon;
-  const sources = useMemo(() => uniqueSources(report.claims), [report.claims]);
+  const links = useMemo(() => aggregateLinks(lanes, report), [lanes, report]);
 
   const grouped = useMemo(() => {
     const g: Record<ClaimSummary["status"], ClaimSummary[]> = {
@@ -138,6 +164,40 @@ export default function VerificationReport({ report, lanes, onReset }: Props) {
   const order: ClaimSummary["status"][] = ["verified", "flagged", "contradicted", "unverified"];
   const now = new Date();
   const dateLabel = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const elapsedLabel = formatElapsed(elapsedMs);
+  const runShort = runId ? runId.slice(0, 8) : null;
+
+  const handleDownloadTrace = () => {
+    if (!runId) return;
+    const payload = {
+      schemaVersion: 1 as const,
+      runId,
+      startedAt,
+      finishedAt,
+      elapsedMs,
+      concurrency,
+      sequential,
+      filename,
+      candidate: report.candidateName ? { name: report.candidateName } : null,
+      claims,
+      lanes,
+      report,
+    };
+    const nameSource = report.candidateName || stripExt(filename) || "unknown";
+    const slug = slugify(nameSource) || "unknown";
+    const downloadName = `apollo-trace-${slug}-${runId.slice(0, 8)}.json`;
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = downloadName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   const stackedSegments: BarSegment[] = BREAKDOWN_SEGMENTS.map((s) => ({
     key: s.key,
@@ -155,9 +215,23 @@ export default function VerificationReport({ report, lanes, onReset }: Props) {
         className="apollo-glass rounded-lg border border-apollo-border-strong px-8 py-10 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] gap-10 items-center"
       >
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.26em] text-apollo-muted font-mono">
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.26em] text-apollo-muted font-mono flex-wrap">
             <Sparkles className="w-3 h-3 text-apollo-navy" strokeWidth={1.75} />
-            Verification dossier · {dateLabel}
+            <span>Verification dossier · {dateLabel}</span>
+            {elapsedLabel && (
+              <>
+                <span className="text-apollo-border-strong">·</span>
+                <span>{elapsedLabel}</span>
+              </>
+            )}
+            {runShort && (
+              <>
+                <span className="text-apollo-border-strong">·</span>
+                <span className="text-apollo-ink/60" title={runId ?? undefined}>
+                  {runShort}
+                </span>
+              </>
+            )}
           </div>
           <h1 className="apollo-serif text-[56px] leading-[1] mt-4 text-apollo-ink tracking-[-0.015em]">
             {report.candidateName}
@@ -176,13 +250,22 @@ export default function VerificationReport({ report, lanes, onReset }: Props) {
           <p className="mt-6 text-[16px] text-apollo-ink/80 leading-[1.55] max-w-xl">
             {report.summary}
           </p>
-          <div className="mt-6">
+          <div className="mt-6 flex items-center gap-5 flex-wrap">
             <button
               onClick={onReset}
               className="text-[11px] font-mono uppercase tracking-[0.22em] text-apollo-muted hover:text-apollo-navy underline underline-offset-4"
             >
               Start new analysis →
             </button>
+            {runId && (
+              <button
+                onClick={handleDownloadTrace}
+                className="inline-flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-[0.22em] text-apollo-muted hover:text-apollo-navy underline underline-offset-4"
+              >
+                <Download className="w-3 h-3" strokeWidth={2} />
+                Download trace (json)
+              </button>
+            )}
           </div>
         </div>
         <div className="flex flex-col items-center">
@@ -280,8 +363,12 @@ export default function VerificationReport({ report, lanes, onReset }: Props) {
                   }}
                   className="grid gap-3 md:grid-cols-2"
                 >
-                  {items.map((c) => (
-                    <ClaimCard key={c.claimRef} claim={c} lanes={lanes} />
+                  {items.map((c, idx) => (
+                    <ClaimCard
+                      key={`${c.claimRef}-${idx}`}
+                      claim={c}
+                      lanes={lanes}
+                    />
                   ))}
                 </motion.div>
               </div>
@@ -290,23 +377,31 @@ export default function VerificationReport({ report, lanes, onReset }: Props) {
         </div>
       </section>
 
-      {sources.length > 0 && (
-        <section className="mt-14 pt-6 border-t border-apollo-border">
-          <div className="flex items-center gap-3 mb-4">
-            <span className="text-[10px] font-mono uppercase tracking-[0.24em] text-apollo-muted">
-              Sources consulted · {sources.length} {sources.length === 1 ? "domain" : "domains"}
-            </span>
-            <div className="flex-1 apollo-divider" />
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {sources.map((s) => (
-              <SourceChip key={s} url={s} size="xs" />
-            ))}
-          </div>
-        </section>
-      )}
+      <LinksSurfaced links={links} />
     </div>
   );
+}
+
+function formatElapsed(ms: number): string {
+  if (!ms || ms < 0) return "";
+  const total = Math.floor(ms / 1000);
+  if (total < 60) return `${total}s`;
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}m ${String(s).padStart(2, "0")}s`;
+}
+
+function stripExt(name: string | null): string {
+  if (!name) return "";
+  return name.replace(/\.[^./\\]+$/, "");
+}
+
+function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
 }
 
 function LaneSummaryStrip({ lanes }: { lanes: Record<LaneState["laneId"], LaneState> }) {
@@ -417,12 +512,14 @@ function ClaimCard({
         >
           <cfg.Icon className="w-4 h-4" strokeWidth={1.75} />
         </span>
-        <h3 className="apollo-serif text-[17px] text-apollo-ink leading-snug flex-1 min-w-0">
-          {claim.label}
-        </h3>
-        <span className="text-[10px] font-mono text-apollo-muted uppercase tracking-[0.18em] shrink-0 mt-1.5">
-          {claim.claimRef}
-        </span>
+        <div className="flex-1 min-w-0">
+          <h3 className="apollo-serif text-[17px] text-apollo-ink leading-snug break-words">
+            {claim.label}
+          </h3>
+          <div className="mt-1 text-[10px] font-mono text-apollo-muted uppercase tracking-[0.18em] truncate">
+            {claim.claimRef}
+          </div>
+        </div>
       </div>
       <p className="text-[13.5px] text-apollo-ink/80 leading-relaxed">
         {claim.rationale}

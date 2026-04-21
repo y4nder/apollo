@@ -11,10 +11,12 @@ import {
   type ReactNode,
 } from "react";
 import type {
+  JobContext,
+  LaneFinding,
   LaneId,
+  LaneResult,
   ResumeClaims,
   TraceStep,
-  LaneFinding,
   VerificationReport,
 } from "../lib/schemas";
 
@@ -46,33 +48,91 @@ function emptyLanes(): Record<LaneId, LaneState> {
   }, {} as Record<LaneId, LaneState>);
 }
 
+function lanesFromSaved(
+  laneResults: LaneResult[]
+): Record<LaneId, LaneState> {
+  const base = emptyLanes();
+  for (const r of laneResults) {
+    base[r.laneId] = {
+      laneId: r.laneId,
+      status: r.status,
+      trace: [],
+      findings: r.findings,
+      notes: r.notes,
+    };
+  }
+  return base;
+}
+
 interface AnalysisContextValue {
   phase: Phase;
   filename: string | null;
   claims: ResumeClaims | null;
+  job: JobContext | null;
   lanes: Record<LaneId, LaneState>;
   report: VerificationReport | null;
   error: string | null;
   elapsedMs: number;
   concurrency: number | null;
   sequential: boolean;
-  startAnalysis: (file: File) => Promise<void>;
+  runId: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  trustScore: number | null;
+  startFromApplication: (applicationId: string) => Promise<void>;
   cancel: () => void;
   reset: () => void;
 }
 
 const AnalysisContext = createContext<AnalysisContextValue | null>(null);
 
-export function AnalysisProvider({ children }: { children: ReactNode }) {
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [filename, setFilename] = useState<string | null>(null);
-  const [claims, setClaims] = useState<ResumeClaims | null>(null);
-  const [lanes, setLanes] = useState<Record<LaneId, LaneState>>(emptyLanes);
-  const [report, setReport] = useState<VerificationReport | null>(null);
+export interface InitialAnalysisState {
+  runId: string;
+  claims: ResumeClaims;
+  laneResults: LaneResult[];
+  report: VerificationReport;
+  trustScore: number;
+  startedAt: string;
+  finishedAt: string;
+  filename?: string;
+}
+
+export function AnalysisProvider({
+  children,
+  initial,
+}: {
+  children: ReactNode;
+  initial?: InitialAnalysisState;
+}) {
+  const initialIsDone = !!initial;
+  const [phase, setPhase] = useState<Phase>(initialIsDone ? "done" : "idle");
+  const [filename, setFilename] = useState<string | null>(
+    initial?.filename ?? null
+  );
+  const [claims, setClaims] = useState<ResumeClaims | null>(
+    initial?.claims ?? null
+  );
+  const [job, setJob] = useState<JobContext | null>(null);
+  const [lanes, setLanes] = useState<Record<LaneId, LaneState>>(() =>
+    initial ? lanesFromSaved(initial.laneResults) : emptyLanes()
+  );
+  const [report, setReport] = useState<VerificationReport | null>(
+    initial?.report ?? null
+  );
   const [error, setError] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [concurrency, setConcurrency] = useState<number | null>(null);
   const [sequential, setSequential] = useState(false);
+  const [runId, setRunId] = useState<string | null>(initial?.runId ?? null);
+  const [startedAt, setStartedAt] = useState<number | null>(
+    initial?.startedAt ? new Date(initial.startedAt).getTime() : null
+  );
+  const [finishedAt, setFinishedAt] = useState<number | null>(
+    initial?.finishedAt ? new Date(initial.finishedAt).getTime() : null
+  );
+  const [trustScoreState, setTrustScoreState] = useState<number | null>(
+    initial?.trustScore ?? null
+  );
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
@@ -92,12 +152,17 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
     setPhase("idle");
     setFilename(null);
     setClaims(null);
+    setJob(null);
     setLanes(emptyLanes());
     setReport(null);
     setError(null);
     setElapsedMs(0);
     setConcurrency(null);
     setSequential(false);
+    setRunId(null);
+    setStartedAt(null);
+    setFinishedAt(null);
+    setTrustScoreState(null);
   }, [stopTimer]);
 
   const cancel = useCallback(() => {
@@ -131,9 +196,15 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
   const handleEvent = useCallback(
     (type: string, data: unknown) => {
       switch (type) {
+        case "runStarted": {
+          const d = data as { runId: string; startedAt: number };
+          setRunId(d.runId);
+          setStartedAt(d.startedAt);
+          break;
+        }
         case "upload": {
           const d = data as { filename: string; bytes: number };
-          setFilename(d.filename);
+          if (d.filename) setFilename(d.filename);
           setPhase("parsing");
           break;
         }
@@ -143,6 +214,9 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
         case "claims":
           setClaims(data as ResumeClaims);
           setPhase("analyzing");
+          break;
+        case "job":
+          setJob(data as JobContext);
           break;
         case "mode": {
           const d = data as { concurrency: number; sequential: boolean };
@@ -166,7 +240,11 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "laneComplete": {
-          const d = data as { laneId: LaneId; status: "ok" | "partial" | "failed"; notes?: string };
+          const d = data as {
+            laneId: LaneId;
+            status: "ok" | "partial" | "failed";
+            notes?: string;
+          };
           updateLane(d.laneId, { status: d.status, notes: d.notes });
           break;
         }
@@ -176,13 +254,21 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
         case "report":
           setReport(data as VerificationReport);
           break;
-        case "done":
+        case "done": {
+          const d = data as {
+            elapsedMs: number;
+            trustScore?: number;
+          };
           setPhase("done");
+          setFinishedAt(Date.now());
+          if (typeof d.trustScore === "number") setTrustScoreState(d.trustScore);
           stopTimer();
           break;
+        }
         case "error":
           setError((data as { message: string }).message);
           setPhase("error");
+          setFinishedAt(Date.now());
           stopTimer();
           break;
       }
@@ -190,12 +276,11 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
     [appendFinding, appendTrace, stopTimer, updateLane]
   );
 
-  const startAnalysis = useCallback(
-    async (file: File) => {
+  const startFromApplication = useCallback(
+    async (applicationId: string) => {
       reset();
       const controller = new AbortController();
       abortRef.current = controller;
-      setFilename(file.name);
       setPhase("uploading");
       startedAtRef.current = Date.now();
       setElapsedMs(0);
@@ -205,17 +290,17 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
         }
       }, 500);
 
-      const form = new FormData();
-      form.append("file", file);
-
       try {
         const response = await fetch("/api/analyze", {
           method: "POST",
-          body: form,
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ applicationId }),
           signal: controller.signal,
         });
         if (!response.ok) {
-          const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+          const body = await response.json().catch(() => ({
+            error: `HTTP ${response.status}`,
+          }));
           throw new Error(body.error ?? `HTTP ${response.status}`);
         }
         const reader = response.body?.getReader();
@@ -261,17 +346,40 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
       phase,
       filename,
       claims,
+      job,
       lanes,
       report,
       error,
       elapsedMs,
       concurrency,
       sequential,
-      startAnalysis,
+      runId,
+      startedAt,
+      finishedAt,
+      trustScore: trustScoreState,
+      startFromApplication,
       cancel,
       reset,
     }),
-    [phase, filename, claims, lanes, report, error, elapsedMs, concurrency, sequential, startAnalysis, cancel, reset]
+    [
+      phase,
+      filename,
+      claims,
+      job,
+      lanes,
+      report,
+      error,
+      elapsedMs,
+      concurrency,
+      sequential,
+      runId,
+      startedAt,
+      finishedAt,
+      trustScoreState,
+      startFromApplication,
+      cancel,
+      reset,
+    ]
   );
 
   return <AnalysisContext.Provider value={value}>{children}</AnalysisContext.Provider>;

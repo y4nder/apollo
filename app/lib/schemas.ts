@@ -89,3 +89,13 @@ export const VerificationReport = z.object({
   redFlags: z.array(z.string()),
 });
 export type VerificationReport = z.infer<typeof VerificationReport>;
+
+export const JobContext = z.object({
+  id: z.string(),
+  title: z.string(),
+  category: z.string(),
+  description: z.string(),
+  coreSkills: z.array(z.string()),
+  niceSkills: z.array(z.string()),
+});
+export type JobContext = z.infer<typeof JobContext>;

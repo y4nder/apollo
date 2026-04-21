@@ -14,9 +14,10 @@ const USER_PROMPT =
   "Extract the candidate's hiring claims from this resume. " +
   "Populate every required field. Put the full text of the resume into `rawText`.";
 
-export async function parseResume(file: File): Promise<ResumeClaims> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-
+export async function parseResume(input: {
+  bytes: Uint8Array;
+  filename: string;
+}): Promise<ResumeClaims> {
   const { object } = await generateObject({
     model: anthropic(process.env.APOLLO_MODEL ?? "claude-haiku-4-5"),
     schema: ResumeClaims,
@@ -25,7 +26,12 @@ export async function parseResume(file: File): Promise<ResumeClaims> {
       {
         role: "user",
         content: [
-          { type: "file", data: bytes, mediaType: "application/pdf", filename: file.name },
+          {
+            type: "file",
+            data: input.bytes,
+            mediaType: "application/pdf",
+            filename: input.filename,
+          },
           { type: "text", text: USER_PROMPT },
         ],
       },

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { AnalysisProvider } from "./context/AnalysisContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Apollo — Resume verification",
-  description: "Four agents verify a candidate's claims in parallel. Watch them work.",
+  title: "Apollo — Resume intake & verification",
+  description:
+    "Drop a resume, see matched roles, apply. Employers get live-verified candidates.",
 };
 
 export default function RootLayout({
@@ -29,7 +29,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-apollo-paper text-apollo-ink">
-        <AnalysisProvider>{children}</AnalysisProvider>
+        {children}
       </body>
     </html>
   );

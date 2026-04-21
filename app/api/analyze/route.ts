@@ -6,16 +6,27 @@ import { runLinkedinLane } from "../../lib/lanes/linkedin";
 import { runGithubLane } from "../../lib/lanes/github";
 import { runNewsLane } from "../../lib/lanes/news";
 import { synthesize } from "../../lib/synthesize";
-import type { LaneId, LaneResult } from "../../lib/schemas";
+import type {
+  JobContext,
+  LaneId,
+  LaneResult,
+  ResumeClaims,
+} from "../../lib/schemas";
+import { authorizeApplicationAccess } from "../../lib/auth";
+import { createSupabaseAdminClient } from "../../lib/supabase/admin";
+import {
+  saveVerificationReport,
+  setApplicationStatus,
+} from "../../lib/reports/save";
+import { trustScore, claimsBreakdown } from "../../lib/evidenceTrail";
 
 export const maxDuration = 300;
 export const runtime = "nodejs";
 
-const DEFAULT_MAX_PDF_BYTES = 5 * 1024 * 1024;
-
 type LaneRunner = (
-  claims: Parameters<typeof runEmployerLane>[0],
-  emit: Parameters<typeof runEmployerLane>[1],
+  claims: ResumeClaims,
+  job: JobContext,
+  emit: Parameters<typeof runEmployerLane>[2],
   signal?: AbortSignal
 ) => Promise<LaneResult>;
 
@@ -26,40 +37,100 @@ const LANES: Array<{ id: LaneId; run: LaneRunner }> = [
   { id: "news", run: runNewsLane },
 ];
 
+type ResumeRow = {
+  id: string;
+  storage_path: string;
+  filename: string;
+  claims: ResumeClaims | null;
+  candidate_name: string;
+};
+
 export async function POST(req: Request): Promise<Response> {
   if (!process.env.ANTHROPIC_API_KEY) {
-    return Response.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
+    return Response.json(
+      { error: "ANTHROPIC_API_KEY not configured" },
+      { status: 500 }
+    );
   }
 
-  let form: FormData;
+  let body: { applicationId?: string };
   try {
-    form = await req.formData();
+    body = (await req.json()) as { applicationId?: string };
   } catch {
-    return Response.json({ error: "Expected multipart/form-data with a 'file' field" }, { status: 400 });
+    return Response.json(
+      { error: "Expected JSON body with { applicationId }" },
+      { status: 400 }
+    );
+  }
+  const applicationId = body.applicationId;
+  if (!applicationId || typeof applicationId !== "string") {
+    return Response.json(
+      { error: "Missing applicationId" },
+      { status: 400 }
+    );
   }
 
-  const file = form.get("file");
-  if (!(file instanceof File)) {
-    return Response.json({ error: "Missing 'file' in form data" }, { status: 400 });
+  // Authorize + load application + job (service-role internally, auth-gated).
+  const { application, job: jobRow } = await authorizeApplicationAccess(
+    applicationId
+  );
+
+  const admin = createSupabaseAdminClient();
+  const resumeRes = (await admin
+    .from("resumes")
+    .select("id, storage_path, filename, claims, candidate_name")
+    .eq("id", application.resume_id)
+    .single()) as unknown as { data: ResumeRow | null; error: unknown };
+  if (resumeRes.error || !resumeRes.data) {
+    return Response.json({ error: "Resume not found" }, { status: 404 });
   }
-  if (file.type && file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-    return Response.json({ error: "Only PDF resumes are supported" }, { status: 415 });
-  }
-  const maxBytes = Number(process.env.APOLLO_MAX_PDF_BYTES ?? DEFAULT_MAX_PDF_BYTES);
-  if (file.size > maxBytes) {
-    return Response.json({ error: `PDF exceeds ${Math.round(maxBytes / 1024 / 1024)} MB limit` }, { status: 413 });
-  }
+  const resume = resumeRes.data;
+
+  const jobContext: JobContext = {
+    id: jobRow.id,
+    title: jobRow.title,
+    category: jobRow.category,
+    description: jobRow.description,
+    coreSkills: jobRow.skills_required
+      .filter((s) => s.core)
+      .map((s) => s.name),
+    niceSkills: jobRow.skills_required
+      .filter((s) => !s.core)
+      .map((s) => s.name),
+  };
 
   const { emit, close, stream } = createSSE();
   const signal = req.signal;
   const startedAt = Date.now();
+  const runId = crypto.randomUUID();
 
   (async () => {
     try {
-      await emit("upload", { filename: file.name, bytes: file.size });
+      await setApplicationStatus(applicationId, "verifying");
+      await emit("runStarted", { runId, startedAt });
+      await emit("upload", { filename: resume.filename, bytes: 0 });
 
-      await emit("parsing", { stage: "extracting claims" });
-      const claims = await parseResume(file);
+      let claims: ResumeClaims;
+      if (resume.claims) {
+        claims = resume.claims;
+      } else {
+        await emit("parsing", { stage: "downloading resume" });
+        const dl = await admin.storage
+          .from("resumes")
+          .download(resume.storage_path);
+        if (dl.error || !dl.data) {
+          throw new Error(
+            `Could not download resume: ${dl.error?.message ?? "unknown"}`
+          );
+        }
+        const bytes = new Uint8Array(await dl.data.arrayBuffer());
+        await emit("parsing", { stage: "extracting claims" });
+        claims = await parseResume({ bytes, filename: resume.filename });
+        await admin
+          .from("resumes")
+          .update({ claims })
+          .eq("id", resume.id);
+      }
 
       const hasAnyClaim =
         claims.employers.length > 0 ||
@@ -67,12 +138,14 @@ export async function POST(req: Request): Promise<Response> {
         claims.projects.length > 0 ||
         claims.skills.length > 0;
       if (!hasAnyClaim && !claims.rawText.trim()) {
+        await setApplicationStatus(applicationId, "failed");
         await emit("error", {
           message: "Could not extract claims — is the PDF text-based?",
         });
         return;
       }
       await emit("claims", claims);
+      await emit("job", jobContext);
 
       const concurrency = getConfiguredConcurrency();
       const sequential = concurrency <= 1;
@@ -83,12 +156,12 @@ export async function POST(req: Request): Promise<Response> {
         laneResults = [];
         for (const lane of LANES) {
           if (signal.aborted) break;
-          const result = await lane.run(claims, emit, signal);
+          const result = await lane.run(claims, jobContext, emit, signal);
           laneResults.push(result);
         }
       } else {
         const settled = await Promise.allSettled(
-          LANES.map((lane) => lane.run(claims, emit, signal))
+          LANES.map((lane) => lane.run(claims, jobContext, emit, signal))
         );
         laneResults = settled.map((s, i) =>
           s.status === "fulfilled"
@@ -102,15 +175,49 @@ export async function POST(req: Request): Promise<Response> {
         );
       }
 
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        await setApplicationStatus(applicationId, "submitted");
+        return;
+      }
 
       await emit("synthesizing", {});
-      const report = await synthesize(claims, laneResults, signal);
+      const report = await synthesize(claims, laneResults, jobContext, signal);
       await emit("report", report);
 
-      await emit("done", { elapsedMs: Date.now() - startedAt });
+      const ts = trustScore(report.claims);
+      const finishedAt = Date.now();
+      await saveVerificationReport({
+        applicationId,
+        runId,
+        report,
+        laneResults,
+        claims,
+        trustScore: ts,
+        startedAt,
+        finishedAt,
+      });
+      await setApplicationStatus(applicationId, "verified");
+
+      const breakdown = claimsBreakdown(report.claims);
+      await emit("done", {
+        elapsedMs: finishedAt - startedAt,
+        trustScore: Math.round(ts),
+        breakdown,
+      });
     } catch (err) {
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        try {
+          await setApplicationStatus(applicationId, "submitted");
+        } catch {
+          // best effort
+        }
+        return;
+      }
+      try {
+        await setApplicationStatus(applicationId, "failed");
+      } catch {
+        // best effort
+      }
       const message = err instanceof Error ? err.message : String(err);
       await emit("error", { message });
     } finally {
