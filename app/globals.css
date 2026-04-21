@@ -1,26 +1,115 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --apollo-navy: #0b2545;
+  --apollo-navy-soft: #13365f;
+  --apollo-verify: #16a34a;
+  --apollo-flag: #d97706;
+  --apollo-contradict: #dc2626;
+  --apollo-paper: #f7f5f0;
+  --apollo-ink: #0f172a;
+  --apollo-muted: #64748b;
+  --apollo-border: #e2e1da;
+  --apollo-border-strong: #cbc8bd;
+  --apollo-card: #ffffff;
+
+  --background: var(--apollo-paper);
+  --foreground: var(--apollo-ink);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-apollo-navy: var(--apollo-navy);
+  --color-apollo-navy-soft: var(--apollo-navy-soft);
+  --color-apollo-verify: var(--apollo-verify);
+  --color-apollo-flag: var(--apollo-flag);
+  --color-apollo-contradict: var(--apollo-contradict);
+  --color-apollo-paper: var(--apollo-paper);
+  --color-apollo-ink: var(--apollo-ink);
+  --color-apollo-muted: var(--apollo-muted);
+  --color-apollo-border: var(--apollo-border);
+  --color-apollo-border-strong: var(--apollo-border-strong);
+  --color-apollo-card: var(--apollo-card);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-serif: ui-serif, Georgia, "Times New Roman", serif;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+}
+
+.apollo-grid {
+  background-image:
+    linear-gradient(to right, rgba(11, 37, 69, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(11, 37, 69, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.apollo-card {
+  background: var(--apollo-card);
+  border: 1px solid var(--apollo-border);
+  border-radius: 6px;
+}
+
+.apollo-card-strong {
+  background: var(--apollo-card);
+  border: 1px solid var(--apollo-border-strong);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 10px -6px rgba(15, 23, 42, 0.08);
+}
+
+.apollo-serif {
+  font-family: var(--font-serif);
+  letter-spacing: -0.01em;
+}
+
+@keyframes apolloPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+.apollo-pulse-dot {
+  animation: apolloPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes apolloFadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.apollo-fade-up {
+  animation: apolloFadeUp 0.25s ease-out both;
+}
+
+.apollo-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--apollo-border-strong) transparent;
+}
+.apollo-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+.apollo-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.apollo-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--apollo-border-strong);
+  border-radius: 3px;
+}
+
+.apollo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  background: rgba(11, 37, 69, 0.04);
+  border: 1px solid rgba(11, 37, 69, 0.12);
+  color: var(--apollo-navy);
+  white-space: nowrap;
+}
+
+.apollo-divider {
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--apollo-border) 15%, var(--apollo-border) 85%, transparent);
 }
